@@ -1,0 +1,12 @@
+# 므네모시네 아틀라스 패널 46 (님프) 를 다시 배열하기 위한 예시 설정.
+# images 의 값은 data/artworks/artworks.csv 의 id 와 같아야 한다.
+# 패널 46 사진 자료의 권리 확인은 아직 열린 질문이다. 확인된 그림만 넣을 것.
+# 아래 두 항목은 형식을 보여 주는 자리표시일 뿐이다. Ghirlandaio 의 세례자 요한 탄생(과일 바구니를 인 하녀)은
+# 패널 46 의 중심이지만, 나머지 구성은 Warburg Institute 의 패널 사진과 대조해 채울 것.
+name: "Mnemosyne Atlas, Panel 46 (Ninfa)"
+slug: panel46
+condition: brain        # 생존 길이를 잴 사슬 조건 (brain | control)
+sigma: 0.5              # brain 일 때 사용할 잡음 크기
+images:
+  - ghirlandaio_birth_baptist
+  - botticelli_birth_venus

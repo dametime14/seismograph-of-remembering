@@ -1,0 +1,9 @@
+# GPU 없이 mock 백엔드로 파이프라인만 점검할 때의 최소 환경 (scripts/smoke_test_mock.sh)
+numpy
+torch
+pyyaml
+pillow
+scikit-image
+pandas
+matplotlib
+pytest

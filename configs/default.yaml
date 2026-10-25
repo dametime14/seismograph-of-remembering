@@ -1,0 +1,110 @@
+# 기억의 지진계 (Seismograph of Remembering) : 기본 설정
+#
+# 경로는 랩서버에 맞게 이 파일을 복사해서 고쳐 쓰는 것을 권장한다.
+#   cp configs/default.yaml configs/local.yaml   (local.yaml 은 git 에 올라가지 않는다)
+#   python scripts/02_prepare_nsd.py --config configs/local.yaml
+#
+# ${VAR} 형태는 같은 파일 안의 다른 키(점 표기) 또는 환경변수로 치환된다.
+
+project:
+  name: seismograph-of-remembering
+  seed: 0
+
+paths:
+  root: .                                   # 저장소 루트 (상대경로 기준)
+  data_root: ./data                         # 모든 대용량 데이터의 뿌리. 랩서버의 스토리지로 바꿀 것
+  nsd_root: ${paths.data_root}/nsd          # NSD 원본 (aws s3 에서 받은 그대로의 폴더 구조)
+  processed: ${paths.data_root}/processed   # subj01 학습/테스트 배열
+  features: ${paths.data_root}/features     # VDVAE, CLIP 특징
+  models: ${paths.data_root}/models         # 학습된 인공 뇌 (인코더, 디코더, 보정 통계)
+  weights: ${paths.data_root}/weights       # 사전학습 가중치 (VDVAE, Versatile Diffusion)
+  third_party: ./third_party                # brain-diffuser 원본 코드 (scripts/00_setup_third_party.sh 가 받음)
+  artworks: ${paths.data_root}/artworks     # 사슬에 넣을 그림 (퍼블릭 도메인)
+  outputs: ./outputs                        # 사슬 결과, 그림, 로그
+  emotion_root: ${paths.data_root}/emotion  # Cowen/Horikawa 감정 라벨과 영상
+
+# 단일 모델 원칙: 처음부터 끝까지 Brain-Diffuser 계열 하나만 쓴다.
+backend: braindiffuser   # braindiffuser | mock (mock 은 GPU 없이 파이프라인만 점검)
+
+device: cuda:0
+
+nsd:
+  subject: 1
+  roi: nsdgeneral
+  n_sessions: 37          # Brain-Diffuser 와 같은 분할 (공유 1000장 중 982장이 테스트)
+  beta_version: betas_fithrf_GLMdenoise_RR
+  space: func1pt8mm
+  beta_scale: 300.0       # NSD beta 는 int16 * 300 으로 저장되어 있다
+
+features:
+  dtype: float32
+  vdvae_layers: 31        # Brain-Diffuser 와 동일 (91,168 차원)
+  clipvision_tokens: 257  # CLS 1 + 패치 256
+  cliptext_tokens: 77
+  batch_size: 16
+
+# 인공 뇌 = 인코더 E (그림 특징 -> 복셀) + 디코더 D (복셀 -> 생성 모델의 조건)
+brain:
+  decoders:
+    # 알파는 Brain-Diffuser 원 논문 값을 그대로 쓴다
+    vdvae:      {alpha: 50000}
+    clipvision: {alpha: 60000}
+    cliptext:   {alpha: 100000}
+  encoder:
+    # 인코더 입력 블록. 같은 모델(VDVAE, CLIP ViT-L/14)의 특징만 쓴다.
+    blocks: [clip_cls, clip_patch_pool, vdvae]
+    clip_patch_pool_grid: 4        # 16x16 패치를 4x4 로 평균 풀링 -> 16*768
+    # 블록마다 표준화하고 1/차원 가중치를 주므로 그람 행렬 대각이 블록 수(3) 정도다. 알파 격자는 넓게 둔다.
+    alphas: [1.0e-2, 3.0e-2, 1.0e-1, 3.0e-1, 1.0, 3.0, 1.0e1, 3.0e1, 1.0e2, 3.0e2, 1.0e3, 3.0e3, 1.0e4, 3.0e4, 1.0e5]
+    val_fraction: 0.1              # 학습셋 안에서 복셀별 알파를 고를 검증 비율
+  control_text_alphas: [1.0e-2, 1.0e-1, 1.0, 1.0e1, 1.0e2, 1.0e3, 1.0e4, 1.0e5]
+  chunk_size: 8192                 # 릿지 출력 열을 이만큼씩 나눠 계산 (메모리 조절)
+  solver_device: cuda:0            # 릿지 계산 장치. GPU 메모리가 부족하면 cpu
+  runtime:                         # 사슬을 돌릴 때 인공 뇌 행렬(약 32GB, float32)을 어디에 둘지
+    device: cpu                    # cpu 면 RAM 에, cuda:0 이면 GPU 에 올린다 (VD 와 같은 GPU 를 쓰면 float16 권장)
+    dtype: float32                 # float32 | float16
+    load: memory                   # memory: 한 번에 올림 | mmap: 디스크에서 필요할 때 읽음 (RAM 이 부족할 때)
+
+# 1부 〈뇌를 지나간 그림〉 : x(t+1) = D(E(x(t)) + eps)
+chain:
+  n_iters: 20
+  n_replicates: 3                  # 같은 그림, 같은 조건의 독립 사슬 수
+  sigmas: [0.0, 0.25, 0.5, 1.0]    # 망각의 속도. 복셀 잡음의 크기
+  noise_scale: residual            # residual: 인코더가 설명 못한 실제 뇌의 잔차 표준편차 단위 | unit: z 점수 단위
+  renorm: calibrated               # calibrated: 보정 통계로 재정규화 (Brain-Diffuser 의 배치 재정규화를 고정 통계로 대체)
+  control: true                    # 뇌를 거치지 않는 대조 사슬도 함께 돌린다
+  control_text: ridge              # ridge: CLIP-V -> CLIP-T 직접 선형사상 (뇌 없이 같은 구조) | empty: 빈 프롬프트
+  save_every: 1
+  image_size: 512
+  crop: center_crop                # 정사각형이 아닌 그림: center_crop | pad (회색 여백)
+
+# Versatile Diffusion 생성 설정 (Brain-Diffuser 기본값)
+vd:
+  ddim_steps: 50
+  ddim_eta: 0.0
+  strength: 0.75        # VDVAE 초기 이미지에서 얼마나 멀리 확산할지
+  mixing: 0.4           # 텍스트 조건 비율 (1 - mixing 이 시각 조건 비율)
+  guidance_scale: 7.5
+  fp16: true            # 반드시 true (원본 VD UNet 이 내부에서 half 로 바꾼다)
+
+# 2부 〈므네모시네〉
+emotion:
+  # 사용자의 EmoBrain 저장소에 있는 표(cowen_horikawa_labels.csv)와 같은 형식을 기본으로 한다.
+  labels_csv: ${paths.emotion_root}/cowen_horikawa_labels.csv
+  id_column: stim_num_int
+  score_columns_prefix: score_      # score_0 .. score_33
+  n_categories: 34
+  videos_dir: ${paths.emotion_root}/CowenEmotionVideos   # 0001.mp4 .. 형식
+  video_name_format: "{:04d}.mp4"
+  frames_per_video: 8
+  alphas: [1.0e-2, 1.0e-1, 1.0, 1.0e1, 1.0e2, 1.0e3]
+  category_names: []                 # 순서를 확인한 뒤 채울 것 (표시용)
+
+mnemosyne:
+  panel: configs/panel46.example.yaml
+  form_metric: clip_sim_to_origin    # 형태의 생존을 잴 지표
+  form_threshold: 0.75
+  emotion_threshold: 0.75            # 감정 벡터 코사인 유사도 기준
+  vacancy:
+    n_candidates: 256
+    keep_top: 8

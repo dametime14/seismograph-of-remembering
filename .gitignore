@@ -1,0 +1,14 @@
+# 대용량 자료와 결과는 저장소에 올리지 않는다
+data/
+outputs/
+third_party/
+logs/
+configs/local.yaml
+configs/*.local.yaml
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.DS_Store

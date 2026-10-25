@@ -1,0 +1,12 @@
+# Brain-Diffuser 환경(third_party/brain-diffuser/environment.yml) 위에 더 필요한 것.
+# 대부분 이미 들어 있고, 없을 때만 설치된다.
+pyyaml
+pandas
+h5py
+nibabel
+scipy
+scikit-image
+opencv-python
+matplotlib
+pytest
+awscli
